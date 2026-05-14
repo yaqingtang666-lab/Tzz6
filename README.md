@@ -1,76 +1,68 @@
 
-# 基于可微渲染的三维网格重建项目
+# 基于可微渲染的 3D 重建实验：从球体到奶牛
 
 ## 1. 项目简介
 
-本项目旨在利用 **PyTorch3D** 框架探索可微光栅化（Differentiable Rasterization）技术。通过多视角二维剪影图像作为监督信号，驱动一个初始拓扑结构为球体的网格（Source Mesh）进行形变，最终重建出目标物体（如奶牛）的三维几何形状。
+本实验利用 **PyTorch3D** 的可微渲染技术，通过 2D 多视角剪影（Silhouette）和 RGB 图像作为监督信号，将一个初始的 **各向同性球体（IcoSphere）** 变形并渲染优化，最终重建出目标对象（奶牛）的 3D 几何形状与表面纹理。
 
----
+## 2. 核心实验：初始球体细分数（level）的影响
 
-## 2. 实验目标
+在实验过程中，我通过调整初始球体的细分数（Level）发现它是决定重建精细度和模型拓扑结构的关键参数。通过修改 `ico_sphere(level, device)` 中的 `level` 参数，观察到了明显的重建差异：
 
-* **掌握可微光栅化原理**：深入理解在处理离散几何体（Mesh）边界时，如何通过数学近似解决不可微问题。
-* **三维反向优化**：学习如何通过二维投影（剪影/RGB）反推并优化三维空间中的网格顶点坐标。
-* **正则化深度理解**：深刻理解正则化项在防止拓扑崩坏、处理局部最优解过程中的决定性作用。
+| 细分数 (Level) | 实验现象描述 | 对应截图 |
+| --- | --- | --- |
+| **level=3** | **拓扑不足**：球体面数较少，无法提供足够的自由度来捕捉奶牛的腿部和角部细节，模型整体呈现块状，过渡生硬。 | ![Uploading 小牛3.png…]()
+ |
+| **level=4** | **均衡状态**：面数适中，能够较好地拟合奶牛的主体轮廓（如耳朵、身体），但在极细微的转折处仍存在轻微的锯齿感。 | <img width="1802" height="1070" alt="小牛4" src="https://github.com/user-attachments/assets/cff10362-afa1-48ab-bd94-f881e4ec5669" />
+ |
+| **level=6** | **高精拟合**：提供极高的顶点密度，重建结果非常圆润，能捕捉到复杂的边缘起伏。但过高的细分数显著增加了显存负担和计算耗时。 | <img width="1658" height="1032" alt="小牛6" src="https://github.com/user-attachments/assets/c745e47a-82c7-449d-b17c-7e95579b9ed5" />
+|
 
----
+> **结论**：较高的细分数能显著提升几何精度，但若没有配合足够强的拉普拉斯平滑（Laplacian Smoothing），过密的顶点容易在优化中产生局部破碎或“刺猬状”突起。
 
-## 3. 实验原理
+## 3. 技术管线
 
-### 3.1 软光栅化 (Soft Rasterization)
+1. **初始形状**：生成 `ico_sphere` 作为 Source Mesh。
+2. **形变机制**：通过 `offset_verts` 为每个顶点学习一个位移向量。
+3. **纹理映射**：利用 `TexturesVertex` 为顶点分配 RGB 颜色。
+4. **可微渲染器**：
+* `MeshRasterizer`：进行光栅化。
+* `SoftSilhouetteShader`：渲染剪影，计算几何形状损失。
+* `SoftPhongShader`：渲染带光照的色彩，计算纹理损失。
+5. **损失函数**：
+* **Image Loss**：$L_{rgb}$ (MSE) + $L_{silhouette}$。
+* **Mesh Regularization**：拉普拉斯平滑、边缘长度约束、法线一致性约束。
 
-为了解决传统“硬光栅化”在边界处梯度为 0 导致的梯度消失问题，本项目采用软光栅化技术。通过计算像素到三角形边缘的距离 $d$，利用 Sigmoid 函数产生平滑过渡：
+## 4.核心技术架构
 
+### 1. 几何表示层 (Geometry Representation)
 
-$$A(d) = \text{sigmoid}\left(\frac{d}{\sigma}\right)$$
+* **初始拓扑 (Initial Topology)**：采用对称的二十面体球体（IcoSphere）作为基础网格。通过调整细分数（Level 3/5/6）来控制顶点密度，从而决定重建精度的上限。
+* **形变模型 (Deformation Model)**：学习一个顶点偏移张量 $\Delta V$，通过 `offset_verts` 作用于原始顶点，在保持拓扑连接（Faces）不变的情况下改变几何形状。
 
+### 2. 纹理与材质层 (Texture & Appearance)
 
-其中 $\sigma$ 控制边缘模糊程度，确保即使顶点在像素外部也能提供非零梯度，引导顶点移动。
+* **顶点着色 (Vertex Coloring)**：利用 `TexturesVertex` 将 RGB 颜色信息直接绑定在顶点上。
+* **色彩空间映射**：为了保证导出的颜色符合物理规范，对学习到的颜色参数进行 **Sigmoid** 激活处理，将其映射至 $[0, 1]$ 区间。
 
-### 3.2 网格正则化 (Mesh Regularization)
+### 3. 可微渲染引擎 (Differentiable Rendering Engine)
 
-为了防止顶点交叉重叠形成“刺猬状”的局部最优解，引入三种约束：
-
-1. **拉普拉斯平滑 (Laplacian Smoothing)**：约束相邻顶点，防止表面突起。
-2. **边长一致性 (Edge Length Penalty)**：惩罚异常边长，防止三角形严重拉伸。
-3. **法线一致性 (Normal Consistency)**：约束相邻面法线方向接近，保持表面平滑。
-
-**总损失函数定义：**
-
-
-$$L_{total} = L_{silhouette} + w_{lap}L_{lap} + w_{edge}L_{edge} + w_{normal}L_{normal}$$
-
----
-
-## 4. 项目核心架构
-
-项目代码逻辑遵循以下模块化设计：
-
-* **数据层 (Data Layer)**：负责加载 `cow.obj` 模型，并进行空间坐标归一化处理。
-* **渲染引擎层 (Rendering Engine)**：
-* **相机组**：配置 `FoVPerspectiveCameras` 实现 20 个视角的均匀环绕观测。
-* **光栅化器**：基于 `MeshRasterizer` 设置软边缘模糊参数。
-* **着色器**：使用 `SoftSilhouetteShader` 生成可微的剪影图。
-
-
-* **优化层 (Optimization Layer)**：
-* **参数化**：将球体顶点偏移量 `deform_verts` 设为优化变量。
-* **损失计算**：集成 MSE 剪影损失与三项几何正则化损失。
+* **光栅化配置 (Rasterization)**：使用 `MeshRasterizer` 将 3D 网格投影至 2D 像素平面。通过设置 `blur_radius` 使得光栅化过程可微，允许梯度回传至几何顶点。
+* **多任务着色器 (Shaders)**：
+* **SoftSilhouetteShader**：负责提取 2D 剪影。它不考虑光照，仅通过透明度通道（Alpha Channel）约束几何轮廓。
+* **SoftPhongShader**：集成 `PointLights`（点光源）模型。通过计算法线与光源的夹角生成带有光影效果的 RGB 图像，用于监督表面纹理的生成。
 
 
-* **输出层 (Output Layer)**：实时可视化迭代过程，并导出中间状态为 `.obj` 文件。
 
----
+### 4. 损失函数与正则化 (Losses & Regularization)
 
-## 5. 实验步骤
+为了引导模型在拟合图像的同时保持平滑的几何特征，架构采用了联合损失函数：
 
-1. **环境配置**：安装 `torch`、`torchvision` 及 `pytorch3d`。建议在 ModelScope DSW 环境下运行以获取 GPU 加速。
-2. **加载目标**：载入目标奶牛网格并预渲染 20 视角参考剪影图。
-3. **初始化**：生成高细分等级的 `ico_sphere` 作为初始源模型。
-4. **执行循环**：运行优化迭代（默认 300 轮），使用 `Adam` 或 `SGD` 优化器不断修正顶点位置。
-5. **结果导出**：从 `output_meshes/` 目录获取最终生成的 3D 模型。
+* **图像对齐损失**：包含剪影误差（Silhouette Loss）和色彩均方误差（RGB MSE Loss）。
+* **几何正则化项 (Constraint)**：
+* **拉普拉斯平滑 (Laplacian Smoothing)**：约束相邻顶点的位移量，防止表面出现尖锐毛刺或“刺猬状”破碎。
+* **边长偏移 (Edge Alignment)**：抑制三角形边长的过度拉伸。
+* **法线一致性 (Normal Consistency)**：确保相邻面片的法向量方向平滑过渡。
 
----
 
-## 6. 参考效果
 
