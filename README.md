@@ -11,8 +11,8 @@
 
 | 细分数 (Level) | 实验现象描述 | 对应截图 |
 | --- | --- | --- |
-| **level=3** | **拓扑不足**：球体面数较少，无法提供足够的自由度来捕捉奶牛的腿部和角部细节，模型整体呈现块状，过渡生硬。 | ![Uploading 小牛3.png…]()
- |
+| **level=3** | **拓扑不足**：球体面数较少，无法提供足够的自由度来捕捉奶牛的腿部和角部细节，模型整体呈现块状，过渡生硬。 | <img width="1774" height="1042" alt="小牛3" src="https://github.com/user-attachments/assets/4edf8959-ca99-4a62-ba4d-25c7902534b2" />
+|
 | **level=4** | **均衡状态**：面数适中，能够较好地拟合奶牛的主体轮廓（如耳朵、身体），但在极细微的转折处仍存在轻微的锯齿感。 | <img width="1802" height="1070" alt="小牛4" src="https://github.com/user-attachments/assets/cff10362-afa1-48ab-bd94-f881e4ec5669" />
  |
 | **level=6** | **高精拟合**：提供极高的顶点密度，重建结果非常圆润，能捕捉到复杂的边缘起伏。但过高的细分数显著增加了显存负担和计算耗时。 | <img width="1658" height="1032" alt="小牛6" src="https://github.com/user-attachments/assets/c745e47a-82c7-449d-b17c-7e95579b9ed5" />
