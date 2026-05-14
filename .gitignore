@@ -1,0 +1,8 @@
+.lingma_storage/
+.configs/
+.vscode/
+.virtual_documents/
+output_meshes/
+*.obj
+__pycache__/
+.ipynb_checkpoints/
